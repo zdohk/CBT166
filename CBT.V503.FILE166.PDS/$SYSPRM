@@ -1,0 +1,1153 @@
+/* ------------------------ rexx ------------------------------ *
+ *                                                              *
+ * Purpose - This exec will bring bring in the concatenation    *
+ * of parmlib members into a temporary data set, then invoke    *
+ * ISPF Edit with macro $SYMSUB to replace system symbolics     *
+ * with the real values.  This is a good way to see what each   *
+ * PARM member specification expands to under the current       *
+ * system.                                                      *
+ *                                                              *
+ * Syntax:                                                      *
+ *                                                              *
+ *       $SYSPRM xxx yyy                                        *
+ *           xxx = Code (from $IEASYS Display)                  *
+ *           yyy = Optional - PANEL (or abbreviation) to        *
+ *                 allow PARMLIB concatenation to be displayed  *
+ *                 and their VOLSER's changed.                  *
+ *                                                              *
+ * Date-written - 10/25/05 - VNV - First added.                 *
+ *       Change - 05/26/10 - VNV - Added more args for z/OS 1.11*
+ *       Change - 11/26/11 - VNV - Change with SSMF 1102 to     *
+ *                           invoke $SYMSUB with UPDATE as      *
+ *                           keyword.                           *
+ *       Change - 06/03/14 - VNV - Change with SSMF 1401 to     *
+ *                           allow CEE display (bug fix)        *
+ *       Change - 10/03/14 - VNV - Include IEASYS00 for "SYS"   *
+ *       Change - 10/09/14 - VNV - Include AUTOR, CATALOG, HZS  *
+ *                           and IXGCNF, GTZ and change IQP     *
+ *       Change - 04/24/15 - VNV - Allow 2nd parm to allow new  *
+ *                           vol to be specified w/ISPF displ.  *
+ *       Change - 03/23/16 - VNV - Include SMFLIM and IEFOPZ    *
+ *                           for z/OS 2.2.                      *
+ *       Change - 10/27/17 - VNV - Include new parm for zOS 2.3 *
+ *                           (FXE, IZU)                         *
+ *       Change - 01/24/18 - VNV - Include new parm for zOS 2.3 *
+ *                           RACF (IRRPRM)                      *
+ *                                                              *
+ * ------------------------------------------------------------ */
+
+parse source . . exec_Name .
+
+if sysvar(SYSISPF) ¬="ACTIVE" then do
+   say "==>" exec_Name "can only run under ISPF."
+   exit 12
+   end
+
+arg allParms
+if allParms = "" then do
+   say "==> PARM required, i.e. PROG, OMVS, etc.. Use $IEASYS to",
+       "find valid PARM."
+   exit 12
+   end
+
+allParms = STRIP(allParms)
+parse var allParms whatParm  extParm .
+
+$opsys   = MVSVAR('SYSOPSYS')
+parse var $opsys . $ovv "." $rel "." .
+$mvsrel = $ovv||$rel
+
+q=0                                     /* set up counter */
+q=q+1;  pTab.q  = "SYS     'A80'x  IEASYS   "
+q=q+1;  pTab.q  = "ALLOC   '868'x  ALLOC    "
+q=q+1;  pTab.q  = "APF     '870'x  IEAAPF   "
+q=q+1;  pTab.q  = "CLOCK   '890'x  CLOCK    "
+q=q+1;  pTab.q  = "CMD     '8A8'x  COMMND   "
+q=q+1;  pTab.q  = "CON     '8B0'x  CONSOL   "
+q=q+1;  pTab.q  = "COUPLE  '8C0'x  COUPLE   "
+q=q+1;  pTab.q  = "DEVSUP  '8E8'x  DEVSUP   "
+q=q+1;  pTab.q  = "DIAG    '8F0'x  DIAG     "
+q=q+1;  pTab.q  = "EXIT    '908'x  EXIT     "
+q=q+1;  pTab.q  = "FIX     '910'x  IEAFIX   "
+q=q+1;  pTab.q  = "GRSCNF  '920'x  GRSCNF   "
+q=q+1;  pTab.q  = "GRSRNL  '928'x  GRSRNL   "
+q=q+1;  pTab.q  = "ICS     '930'x  IEAICS   "
+q=q+1;  pTab.q  = "IKJTSO  'AC0'x  IKJTSO   "
+q=q+1;  pTab.q  = "IOS     '938'x  IECIOS   "
+q=q+1;  pTab.q  = "IPS     '940'x  IEAIPS   "
+q=q+1;  pTab.q  = "LNK     '948'x  LNKLST   "
+q=q+1;  pTab.q  = "LPA     '970'x  LPALST   "
+q=q+1;  pTab.q  = "MLPA    '988'x  IEALPA   "
+q=q+1;  pTab.q  = "MSTRJCL '990'x  MSTJCL   "
+q=q+1;  pTab.q  = "OMVS    '9B0'x  BPXPRM   "
+q=q+1;  pTab.q  = "OPT     '9C0'x  IEAOPT   "
+q=q+1;  pTab.q  = "PAK     '9E8'x  IEAPAK   "
+q=q+1;  pTab.q  = "PROD    '9F8'x  IFAPRD   "
+q=q+1;  pTab.q  = "PROG    'A00'x  PROG     "
+q=q+1;  pTab.q  = "RTLS    'AA0'x  CSVRTL   "
+q=q+1;  pTab.q  = "SCH     'A40'x  SCHED    "
+q=q+1;  pTab.q  = "SMF     'A48'x  SMFPRM   "
+q=q+1;  pTab.q  = "SMS     'A50'x  IGDSMS   "
+q=q+1;  pTab.q  = "SSN     'A60'x  IEFSSN   "
+q=q+1;  pTab.q  = "SVC     'A68'x  IEASVC   "
+q=q+1;  pTab.q  = "UNI     'AA8'x  CUNUNI   "
+q=q+1;  pTab.q  = "VAL     'A88'x  VATLST   "
+q=q+1;  pTab.q  = "CEE     'AF0'x  CEEPRM   "
+q=q+1;  pTab.q  = "CEA     'B08'x  CEAPRM   "
+q=q+1;  pTab.q  = "AXR     'B18'x  AXR      "
+q=q+1;  pTab.q  = "SYM     '000'x  IEASYM   "      /* Special one */
+
+q=q+1
+if $mvsrel > 0112 then pTab.q  = "AUTOR   'B40'x  AUTOR    "
+else                   pTab.q  = "AUTOR"
+
+q=q+1
+if $mvsrel > 0112 then pTab.q  = "CATALOG 'B48'x  IGGCAT   "
+else                   pTab.q  = "CATALOG"
+
+q=q+1
+if $mvsrel > 0113 then pTab.q  = "HZS     'B68'x  HZSPRM   "
+else                   pTab.q  = "HZS"
+
+q=q+1
+if $mvsrel > 0112 then pTab.q  = "IXGCNF  'B50'x  IXGCNF   "
+else                   pTab.q  = "IXGCNF"
+
+q=q+1
+if $mvsrel > 0113 then pTab.q  = "GTZ     'B70'x  GTZPRM   "
+else                   pTab.q  = "GTZ"
+
+q=q+1
+if $mvsrel > 0113 then pTab.q  = "IQP     'B28'x  IQPPRM   "
+else                   pTab.q  = "IQP"
+
+q=q+1
+if $mvsrel > 0201 then pTab.q  = "SMFLIM  'B80'x  SMFLIM   "
+else                   pTab.q  = "SMFLIM"
+
+q=q+1
+if $mvsrel > 0201 then pTab.q  = "IEFOPZ  'B88'x  IEFOPZ   "
+else                   pTab.q  = "IEFOPZ"
+
+q=q+1
+if $mvsrel > 0202 then pTab.q  = "FXE     'B98'x  FXEPRM   "
+else                   pTab.q  = "FXE   "
+
+q=q+1
+if $mvsrel > 0202 then pTab.q  = "IZU     'BA0'x  IZUPRM   "
+else                   pTab.q  = "IZU   "
+
+q=q+1
+if $mvsrel > 0202 then pTab.q  = "RACF    'B90'x  IRRPRM   "
+else                   pTab.q  = "RACF  "
+
+pTab.0    = q          /* This has to match with # of parms allowed */
+
+editMacro = "$SYMSUB"
+$resolve  = "Y"        /* used to do symbolic substitution          */
+
+myOff     = ""
+
+numeric digits 256
+
+cvt     = Get_Stor('10'x)
+ecvt    = Get_Stor(cvt,'8C'x)
+
+do i=1 to pTab.0
+   if whatParm = WORD(pTab.i,1) then do
+      myOff    = WORD(pTab.i,2)
+      myPrefix = WORD(pTab.i,3)
+      leave
+      end
+   end
+
+badMem      = "**_Member_not_found_**"
+myVersion   = "&SYSR1"
+mySysname   = "&SYSNAME"
+
+if myOff = "" then do
+   address ISPEXEC
+   zedsmsg = ""
+   zedlmsg = "Non-Valid PARM member requested, exec aborted.  Use" ,
+             "$IEASYS to find acceptable PARM."
+   "SETMSG MSG(ISRZ001)"
+   exit 12
+   end
+
+x = syscalls('ON')
+testName = "?"
+x = "/$VERSION"
+address syscall "realpath (x) testName"
+if testName <> "?" then do
+   myVersion = STRIP(testName,'L','/')
+   end
+
+testName = "?"
+x = "/$SYSNAME"
+address syscall "realpath (x) testName"
+if testName <> "?" then do
+   mySysname = STRIP(testName,'L','/')
+   end
+
+x = syscalls("OFF")
+address ISPEXEC
+
+/* ------------------------------------------------------------ *
+ * Allocate a temp data set to copy all PARMLIB members into.   *
+ * This data set will be EDIT'ed later using a macro called     *
+ * $SYMSUB which will substitute all symbolics with the real    *
+ * values.                                                      *
+ * ------------------------------------------------------------ */
+
+tempDd  = "$#$"||STRIP(TIME("S"))
+x = outtrap("trap.","*")
+address TSO
+"ALLOC F("tempDd") SPACE(5 10) CYL DSORG(PS) LRECL(1330) RECF(F B)"
+"NEWSTACK"
+tempRc = rc
+x= outtrap("off")
+address ISPEXEC
+"LMINIT DATAID(MYDD) DDNAME("tempDd")"
+
+x = Get_IEASYS()                       /*   Get all System Data  */
+
+/* -------------------------------------------------------------- *
+ * Now - try to expand all concatenated members for this based    *
+ * on where they come from.                                       *
+ * -------------------------------------------------------------- */
+
+address TSO
+runParm = "x=Get_PDE_Data('"whatParm"',"myOff",'"myPrefix"')"
+interpret runParm
+call freeDdnames           /* free all PARMLIB allocations        */
+
+"EXECIO 0 DISKW" tempDd "(FINIS"
+"DELSTACK"
+
+address ISPEXEC
+call Free_TempISPF_Lib     /* free dynamically allocated ISPF libs*/
+
+/* -------------------------------------------------------------- *
+ * Now call the $SYMSUB to substitute in all symbolics by         *
+ * their true values (only if no Parmlib display or with Parmlib  *
+ * display and it was marked as "Y" to do symbolic substituion).  *
+ * -------------------------------------------------------------- */
+
+macrParm = "UPDATE"
+if $resolve = "Y" then ,
+   "EDIT DATAID("myDd") MACRO("editMacro") PARM(MACRPARM)"
+else ,
+   "EDIT DATAID("myDd") MACRO("editMacro")"
+"LMFREE DATAID("myDd")"
+
+address TSO "FREE F("tempDd")"
+
+exit
+
+
+/* -------------------------------------------------------------- *
+ * Generic catch-all 'Error' routine                              *
+ * -------------------------------------------------------------- */
+
+Error:
+address ISPEXEC
+zedsmsg = ""
+zedlsmg = "Error found on line" sigl "with rc:" rc".  Exec aborted.",
+          "Line contents:" STRIP(sourceline(sigl))
+"SETMSG MSG(ISRZ001)"
+address TSO "FREE F("tempDd")"
+exit
+
+
+/* ------------------------------------------------------------ *
+ * Get contents of IPA: IEASYS and other info used during IPL.  *
+ * Also display panel so Parmlib VOLSER can be changed (if      *
+ * requested through parm).                                     *
+ * ------------------------------------------------------------ */
+
+Get_IEASYS:
+
+ipa        = Get_Stor(ecvt,'188'x)
+sysid      = STRIP(Get_Stor(cvt,'154'x,8))
+ieaSymList = STRIP(Get_Stor(ipa,'120'x,63))
+parmNum.   = ""
+parmCt     = 0
+
+/* ------------------------------------------------------------ *
+ * For each PARMLIB in the concatenation, I'm saving the ddn,   *
+ * dsn and volser into an array to be used later.  Initially,   *
+ * the DDnames will be PARMDDxx.  Later, these DDnames will     *
+ * be replaced by a dynmically generated DDname from the        *
+ * LMINIT service for each of these data sets.                  *
+ * ------------------------------------------------------------ */
+
+parmLibNum = C2D(Get_Stor(ipa,'856'x,2))
+libOff     = 416
+do parmLibNum
+   if BITAND(Get_Stor(ipa,libOff+63,1),'80'x) = '80'x then do
+      parmCt = parmCt + 1
+      parmNum.parmCt = "PARMDD"||RIGHT(parmCt,2,0) ,
+                 STRIP(Get_Stor(ipa,libOff,44)) ,
+                 STRIP(Get_Stor(ipa,libOff+45,6))
+      end
+   libOff  = libOff + 64
+   end
+
+/* -------------------------------------------------------------- *
+ * If a 2nd parm provided, then display a panel showing all       *
+ * parmlibs (concatenated) along with their volsers.  This is     *
+ * where new volsers can be specified.                            *
+ * -------------------------------------------------------------- */
+
+load_info = ""              /* start with blank to begin with */
+
+/* if ABBREV('PANEL',extParm,1) > 0 then call Display_Parmlib */
+if extParm <> "" then call Display_Parmlib
+
+/* ------------------------------------------------------------ *
+ * Found all PARMLIB as coming off the IPL.  Now allocate them  *
+ * all so they can be used later using LIMINIT ISPF service.    *
+ * Here is where the ddnames (PARMDDxx) are replaced by the new *
+ * dynamically generated DDnames from a 'LMINIT' since these    *
+ * DDnames will be used for subsequent references to the        *
+ * PARMLIBs from other ISPF LMxxx calls.                        *
+ *                                                              *
+ * Note - the PARMLIBs could have been modified already from    *
+ * the panel. This allows parmlib on a new set of volsers to    *
+ * be used (let's say, for an IPL on a new set of Res vols).    *
+ * ------------------------------------------------------------ */
+
+address ISPEXEC
+do i=1 to parmCt
+   t_dd  = WORD(parmNum.i,1)
+   t_dsn = WORD(parmNum.i,2)
+   t_vol = WORD(parmNum.i,3)
+   "LMINIT DATAID("||t_dd||") DATASET('"||t_dsn||"') "||,
+           "VOLUME("||t_vol||")"
+   "LMOPEN DATAID("VALUE(t_dd)")"
+   parmNum.i = VALUE(t_dd) t_dsn t_vol
+   end
+
+signal on Error
+address TSO
+
+/* ------------------------------------------------------------ *
+ * Go through the MVS Static symbolics and expose the real      *
+ * values to that they can be used later (possibly).            *
+ * ------------------------------------------------------------ */
+
+symTable  = Get_Stor(ecvt,'128'x)
+numSym    = C2D(Get_Stor(symTable,2,2))
+symAddr   = D2C(C2D(symTable)+4)
+valueFor. = ""
+do i=1 to numSym
+   t = (i-1)*16
+   nextSym  = D2C(C2D(symAddr)+t)
+   s_off    = C2D(Get_Stor(nextSym,0,4))
+   s_leng   = C2D(Get_Stor(nextSym,4,4))
+   v_off    = C2D(Get_Stor(nextSym,8,4))
+   v_leng   = C2D(Get_Stor(nextSym,12,4))
+   mySym    = STRIP(Get_Stor(symAddr,s_off,s_leng))
+   mySym    = STRIP(STRIP(mySym,'L','&'),'T','.')
+   if v_leng > 0 then do
+      valueFor.mySym = Get_Stor(symAddr,v_off,v_leng)
+      end
+   else do
+      valueFor.mySym = ""
+      end
+   t = mySym||"='"valueFor.mySym"'"
+   interpret t
+   end
+
+return 0
+
+
+
+/* -------------------------------------------------------------- *
+ * This routines just display a panel to show the list of         *
+ * PARMLIB being allocated.  More libraries can be added          *
+ * and/or VOLSER for these parmlibs can be changed here.          *
+ * -------------------------------------------------------------- */
+
+Display_Parmlib:
+
+/* -------------------------------------------------------------- *
+ * Define all ISPF libraries dynamically                          *
+ * -------------------------------------------------------------- */
+
+load_info = loadispf()       /* Build ISPF members on the fly      */
+
+address ISPEXEC
+"CONTROL ERRORS RETURN"
+do i=1 to 15                 /* Set all input field color to TURQ  */
+   interpret "$PCLR"||i "= 'TURQ'"
+   interpret "$PV$"||i  "= ' '"
+   interpret "$P$P"||i  "= ' '"
+   end
+
+/* -------------------------------------------------------------- *
+ * Fill out the panel with the PARMLIBs coming from IPA           *
+ * -------------------------------------------------------------- */
+
+do j=1 to parmCt
+   t_dsn = WORD(parmNum.j,2)
+   t_vol = WORD(parmNum.j,3)
+   interpret "$P$P"||j "= t_dsn"
+   interpret "$PV$"||j "= t_vol"
+   end
+
+"ADDPOP"
+"DISPLAY PANEL($$PRMLIB)"
+lastRc = rc
+"REMPOP"
+
+if lastRc = 8 then do                /* end key pressed  */
+   call Free_TempISPF_Lib
+   address TSO "FREE F("tempDd")"
+   zedsmsg = "Exec aborted"
+   zedLmsg = "You've pressed END key to abort the execution."
+   "SETMSG MSG(ISRZ001)"
+   exit
+   end
+if lastRc > 0 then do                /* panel error      */
+   call Free_TempISPF_Lib
+   address TSO "FREE F("tempDd")"
+   zedsmsg = ""
+   zedlmsg = "Error displaying panel $$PRMLIB.  Exec aborted."
+   "SETMSG MSG(ISRZ001)"
+   exit 12
+   end
+
+parmCt = 0
+do m=1 to 15
+   if VALUE($P$P||m) <> "" then do
+      myDsat = VALUE($P$P||m)
+      myVol  = VALUE($PV$||m)
+      call Ck_DSAT myDsat myVol
+      if result > 0 then do       /* quit if any dsat is not fnd   */
+         exit 12
+         end
+      end                         /* if VALUE(...     */
+   end                            /* do m=1 to 15     */
+
+return 0
+
+
+/* -------------------------------------------------------------- *
+ * Check every PARMLIB on the panels and make sure they are       *
+ * on the vols as specified.  Any errors will terminate this      *
+ * exec.                                                          *
+ * -------------------------------------------------------------- */
+
+Ck_DSAT:
+arg inDsat inVol .
+t = "'"STRIP(inDsat)"' VOLUME("STRIP(invol)")"
+x = LISTDSI(t)
+if x > 0 then do
+   zedsmsg = ""
+   zedlmsg = "LISTDSI ERROR FOR DATA SET '"inDsat"' ON VOLUME" inVol".",
+             "SYSMSGLVL2 =" SYSMSGLVL2". SYSREASON CODE IS" SYSREASON"."
+   "SETMSG MSG(ISRZ001)"
+   return 12
+   end
+
+/* -------------------------------------------------------------- *
+ * Fill out the tables where all PARMLIBs are stored. The         *
+ * reason here is because the list of Dsats/Volsers could         *
+ * have been modified from the panel.                             *
+ * -------------------------------------------------------------- */
+
+parmCt = parmCt + 1
+parmNum.parmCt = "PARMDD"||RIGHT(parmCt,2,0) ,
+           LEFT(STRIP(inDsat),44) LEFT(STRIP(inVol),6)
+return 0
+
+/* -------------------------------------------------------------- *
+ * Free all Dynamic ISPF libs allocated (panels/skeletons,etc..)  *
+ * -------------------------------------------------------------- */
+
+Free_TempISPF_Lib:
+
+if load_info <> "" then do
+   do until length(load_info) = 0
+      parse value load_info with dd libd load_info
+      if LEFT(libd,6) = "ALTLIB" then do
+         if libd = "ALTLIBC" then lib = "CLIST"
+                             else lib = "EXEC"
+         address TSO,
+           "Altlib Deact Application("lib")"
+         end
+      else "libdef" libd
+      address tso "free f("dd")"
+      end
+   end
+
+return 0
+
+/* ------------------------------------------------------------ *
+ * Routine to parse through the IEASYSxx parm to pick up        *
+ * the specified parm.  Anything with two-chacracter long       *
+ * is really a suffix that points to a member in the PARMLIB    *
+ * concatenation.                                               *
+ * ------------------------------------------------------------ */
+
+Get_PDE_Data:
+
+parse arg parmName,parmOff,parmMem
+
+if parmName ¬= "SYM" then do           /* for non-'IEASYMxx' only */
+   parmName   = LEFT(parmName,8)
+   myPde      = Get_Stor(ipa,parmOff)
+   tempOffset = C2D(parmOff)+4
+   pdeLeng    = C2D(Get_Stor(ipa,tempOffset,2))
+   if pdeLeng > 1024 then pdeLeng = 1024
+   tempOffset = C2D(parmOff)+6
+   origin     = Get_Stor(ipa,tempOffset,2)
+
+   select
+      when origin = '0000'x then do
+         parmSupplied = 0
+         pdeSource = '*' '( dflt )' '*'
+         end
+      when origin = 'FFFF'x then do
+         parmSupplied = 0
+         pdeSource = '*' '( oper )' '*'
+         end
+      otherwise do
+         parmSupplied = 1
+         syspParm  = "IEASYS"origin
+         tempx     =  Obtain_Parm(syspParm)
+         fromParm  =  WORD(tempx,1)
+         pdeSource = '*' 'IEASYS'origin '*'
+         end
+      end
+
+   if C2D(myPde) <> 0 then do
+      pdeText = Get_Stor(myPde,,pdeLeng)
+      end
+   else do
+      pdeText = ""
+      end
+   end
+else do                         /* Processing BPXPRMxx members only */
+   pdeText = ieaSymList
+   end
+
+/* ------------------------------------------------------------ *
+ * For any suffix list, pick out the suffixes and try to        *
+ * figure out where these members came from using the PARMLIB   *
+ * concatenation.                                               *
+ * ------------------------------------------------------------ */
+
+myStack. = 0
+
+if parmMem <> "" then do
+   if SUBSTR(pdeText,1,1) = "(" then do
+      parse var pdeText "(" pdeText ")" .
+      end
+
+   /* ------------------------------------------------------------ *
+    * IEASYS00 is always included no matter what                   *
+    * ------------------------------------------------------------ */
+
+   if parmName = "SYS" then pdeText = "00" pdeText
+
+   pdeText = TRANSLATE(pdeText,' ',',')
+   if WORDS(pdeText) > 0 then do
+      do j=1 to WORDS(pdeText)
+         if LENGTH(WORD(pdeText,j)) = 2 then do
+            indivParmMem = parmMem||WORD(pdeText,j)
+            tempx        = Obtain_Parm(indivParmMem)
+            indivLib     = WORD(tempx,1)
+            if indivLib ¬= badMem then do
+               headLine     = "/*    " indivLib"("indivParmMem")",
+                              "on volume" WORD(tempx,2) "    */"
+               x=W("/*"COPIES("=",LENGTH(headLine)-4)"*/")
+               x=W(headLine)
+               x=W("/*"COPIES("=",LENGTH(headLine)-4)"*/")
+               myStack.0 = myStack.0 + 1
+               x = Copy_Parm(indivLib,indivParmMem,WORD(tempx,2))
+               end
+            else do
+               x=W(badMem)
+               end
+            end
+         end                  /* do j=1     */
+      end                     /* if WORDS   */
+   end                        /* if parmMem */
+return 0
+
+/* --------------------------------------------------------- *
+ * Look at each PARMLIB to see to determine what PARMLIB     *
+ * the member came from.                                     *
+ * Routine returns Dsname & Volser.                          *
+ * --------------------------------------------------------- */
+
+Obtain_Parm:
+arg myInput
+
+foundIt = 0
+
+address ISPEXEC
+signal off Error
+do i=1 to parmCt
+   t_dd  = WORD(parmNum.i,1)
+   "LMMFIND DATAID("t_dd") MEMBER("myInput")"
+   select
+      when rc=0 then do
+         foundIt = 1
+         leave
+         end
+      when rc=8 then nop
+      otherwise do
+         x=W("Error doing LMMFIND on" WORD(parmNum.i,2))
+         leave
+         end
+      end
+   end
+
+signal on Error
+
+address TSO
+if foundIt then
+   return WORD(parmNum.i,2)||" "||WORD(parmNum.i,3)
+else
+   return badMem||" "||WORD(parmNum.i,3)
+
+/* ------------------------------------------------------------ *
+ * I know where a member came from what PARMLIB, so I'm just    *
+ * going to copy the entire member to the temporary data set.   *
+ * For the BPXPRMxx members, whilte copying, I'm also replacing *
+ * $SYSNAME with &SYSNAME and replace $VERSION with the         *
+ * symbolic that it was set to so that the temporary data set   *
+ * can have the symbolics resolved/substituted through the      *
+ * external Rexx routine (done by the call to another macro     *
+ * later).                                                      *
+ * ------------------------------------------------------------ */
+
+Copy_Parm: procedure expose myStack. myVersion mySysname,
+                            DID tempDD badMem
+
+verConstant  = "$VERSION"    /* only used while processing BPXPRMxx */
+sysnConstant = "$SYSNAME"    /* only used while processing BPXPRMxx */
+
+address ISPEXEC
+arg myDsn,myMem,myVolSer
+myDsn = STRIP(myDsn)
+myMem = STRIP(myMem)
+
+memDD = "@#$"||STRIP(TIME("S"))
+x = outtrap("trap.","*")
+address TSO
+"ALLOC F("memDD") DA('"myDsn"("myMem")') SHR REUSE",
+   "UNIT(SYSALLDA) VOL("myVolSer")"
+tempRc = rc
+x= outtrap("off")
+myData. = ""
+address TSO "EXECIO * DISKR" memDD "(STEM MYDATA. FINIS"
+address TSO "FREE F("memDD")"
+myStack.0 = myStack.0 + myData.0
+
+do i=1 to myData.0
+   if SUBSTR(myMem,1,6) = "BPXPRM" then do
+      if LEFT(STRIP(myData.i),8) = "VERSION(" then do
+         parse var myData.i "VERSION(" myVersion ")" .
+         myVersion = TRANSLATE(myVersion," ","'")
+         myVersion = STRIP(WORD(myVersion,1),"B","'")
+         end
+      do while INDEX(myData.i,verConstant) > 0
+         parse var myData.i myLeft (verConstant) myRight
+         myData.i = myLeft||myVersion||myRight
+         end
+      do while INDEX(myData.i,sysnConstant) > 0
+         parse var myData.i myLeft (sysnConstant) myRight
+         myData.i = myLeft||mySysname||myRight
+         end
+      end                   /* if SUBSR= 'BPXPRM' only */
+   call W myData.i
+   end
+
+return 0
+
+
+/* ------------------------------------------------------------ *
+ * Free up the DDnames allocated to all the PARMLIBs.  I'm      *
+ * done with looking at these.  All members have been copied    *
+ * into the temporary data set and ready for processing.        *
+ * ------------------------------------------------------------ */
+
+freeDdnames:
+
+address ISPEXEC
+do i=1 to parmCt
+   t_dd  = WORD(parmNum.i,1)
+   "LMCLOSE DATAID("t_dd")"
+   "LMFREE  DATAID("t_dd")"
+   end
+return 0
+
+
+/* ------------------------------------------------------------ *
+ * Subroutine to write an output line to the temporary data     *
+ * set.                                                         *
+ * ------------------------------------------------------------ */
+
+W:
+parse arg p1
+"NEWSTACK"
+queue p1
+"EXECIO 1 DISKW" tempDd
+"DELSTACK"
+return 0
+
+/*------------------------------------------------------------------*/
+/*                                                                  */
+/*      This procedure will extract data using the MVS Storage      */
+/*      function. Input arguments will be:                          */
+/*                                                                  */
+/*      1) Storage_Pointer or Literal, i.e. cvtPTR or '10'x, or     */
+/*         16 (like '10'x)                                          */
+/*      2) offSet in hex or dec (numnbe), i.e. 'FF'x or 256 or      */
+/*         D2C(256)                                                 */
+/*      3) length of returned data in decimal, i.e. 256             */
+/*                                                                  */
+/*      NOTE - To make sure that this procedure will work all the   */
+/*      times, just include 'NUMERIC DIGITS 256' at the beginning   */
+/*      of the calling REXX exec.                                   */
+/*                                                                  */
+/*------------------------------------------------------------------*/
+
+Get_Stor: procedure
+
+parse arg area,offSet,leng
+
+if ARG(2,'O') then offSet=0
+
+if ARG(3,'O') then leng=4
+
+if DATATYPE(area) = 'CHAR' then do
+   area =  C2D(area)
+   End
+
+if DATATYPE(offSet) = 'CHAR' then do
+   offSet =  C2D(offSet)
+   End
+
+return  STORAGE((D2X(area+offSet)),leng)
+
+
+
+/* --------------------  rexx procedure  -------------------- *
+ * Name:      LoadISPF                                        *
+ *                                                            *
+ * Function:  Load ISPF elements that are inline in the       *
+ *            REXX source code.                               *
+ *                                                            *
+ * Syntax:    rc = loadispf()                                 *
+ *                                                            *
+ *            The inline ISPF resources are limited to        *
+ *            ISPF Messages, Panels, and Skeletons,           *
+ *                 CLISTs and EXECs are also supported.       *
+ *                                                            *
+ *            The inline resources must start in column 1     *
+ *            and use the following syntax:                   *
+ *                                                            *
+ *            >START    used to indicate the start of the     *
+ *                      inline data                           *
+ *                                                            *
+ *            >END    - used to indicate the end of the       *
+ *                      inline data                           *
+ *                                                            *
+ *            Each resource begins with a type record:        *
+ *            >type name                                      *
+ *               where type is CLIST, EXEC, MSG, PANEL, SKEL  *
+ *                     name is the name of the element        *
+ *                                                            *
+ * Sample usage:                                              *
+ *          -* rexx *-                                        *
+ *          load_info = loadispf()                            *
+ *          ... magic code happens here (your code) ...       *
+ *          Address ISPEXEC                                   *
+ *          do until length(load_info) = 0                    *
+ *             parse value load_info with dd libd load_info   *
+ *             if left(libd,6) = "ALTLIB" then do             *
+ *                if libd = "ALTLIBC" then lib = "CLIST"      *
+ *                                    else lib = "EXEC"       *
+ *                Address TSO,                                *
+ *                  "Altlib Deact Application("lib")"         *
+ *                end                                         *
+ *             else "libdef" libd                             *
+ *             address tso "free f("dd")"                     *
+ *             end                                            *
+ *          exit                                              *
+ *          >Start inline elements                            *
+ *          >Panel panel1                                     *
+ *          ...                                               *
+ *          >Msg msg1                                         *
+ *          ...                                               *
+ *          >End of inline elements                           *
+ *                                                            *
+ * Returns:   the list of ddnames allocated for use along     *
+ *            with the libdef's performed or altlib           *
+ *                                                            *
+ *            format is ddname libdef ddname libdef ...       *
+ *                   libdef may be altlibc or altlibe         *
+ *                   for altlib clist or altlib exec          *
+ *                                                            *
+ * Notes:     Entire routine must be included with REXX       *
+ *            exec - inline with the code.                    *
+ *                                                            *
+ * Comments:  The entire rexx program is processed from the   *
+ *            last record to the first to find the >START     *
+ *            record at which point all records from that     *
+ *            point on are processed until the >END           *
+ *            statement or the end of the program is found.   *
+ *                                                            *
+ *            It is *strongly* suggested that the inline      *
+ *            elements be at the very end of your code so     *
+ *            that the search for them is faster.             *
+ *                                                            *
+ *            Inline ISPTLIB or ISPLLIB were not supported    *
+ *            because the values for these would have to be   *
+ *            in hex.                                         *
+ *                                                            *
+ * Author:    Lionel B. Dyck                                  *
+ *            Kaiser Permanente Information Technology        *
+ *            Walnut Creek, CA 94598                          *
+ *            (925) 926-5332                                  *
+ *            Internet: lionel.b.dyck@kp.org                  *
+ *                                                            *
+ * History:                                                   *
+ *            06/04/04 - Enhancements for speed               *
+ *            08/05/02 - Creation                             *
+ *                                                            *
+ * ---------------------------------------------------------- *
+ * Disclaimer: There is no warranty, either explicit or       *
+ * implied with this code. Use it at your own risk as there   *
+ * is no recourse from either the author or his employeer.    *
+ * ---------------------------------------------------------- */
+ LoadISPF: procedure
+
+ parse value "" with null kmsg kpanel kskel first returns ,
+                     kclist kexec
+/* ------------------------------------------------------- *
+ * Find the InLine ISPF Elements and load them into a stem *
+ * variable.                                               *
+ *                                                         *
+ * Elements keyword syntax:                                *
+ * /*>START - start of inline data                         *
+ * >CLIST name                                             *
+ * >EXEC name                                              *
+ * >MSG name                                               *
+ * >PANEL name                                             *
+ * >SKEL name                                              *
+ * >END*/   - end of all inline data (optional if last)    *
+ * ------------------------------------------------------- */
+ last_line = SOURCELINE()
+
+ do i = last_line to 1 by -1
+    line = SOURCELINE(i)
+    if TRANSLATE(LEFT(line,9)) = "/*>START " then leave
+    end
+ rec = 0
+/* --------------------------------------------------- *
+ * Flag types of ISPF resources by testing each record *
+ * then add each record to the data. stem variable.    *
+ * --------------------------------------------------- */
+ do j = i+1 to last_line
+    line = SOURCELINE(j)
+    if TRANSLATE(LEFT(line,7)) = ">END*/ " then leave
+    if TRANSLATE(LEFT(line,7)) = ">CLIST " then kclist = 1
+    if TRANSLATE(LEFT(line,6)) = ">EXEC "  then kexec  = 1
+    if TRANSLATE(LEFT(line,5)) = ">MSG "   then kmsg   = 1
+    if TRANSLATE(LEFT(line,7)) = ">PANEL " then kpanel = 1
+    if TRANSLATE(LEFT(line,6)) = ">SKEL "  then kskel  = 1
+    rec  = rec + 1
+    data.rec = line
+    end
+
+/* ----------------------------------------------------- *
+ * Now create the Library and Load the Member(s)         *
+ * ----------------------------------------------------- */
+ address ISPEXEC
+/* ----------------------------- *
+ * Assign dynamic random ddnames *
+ * ----------------------------- */
+ clistdd = "lc"random(999)"$##"
+ execDD  = "le"random(999)"$##"
+ msgDD   = "lm"random(999)"$##"
+ panelDD = "lp"random(999)"$##"
+ skelDD  = "ls"random(999)"$##"
+
+/* ---------------------------------------- *
+ *  LMINIT and LmOpen each resource library *
+ * ---------------------------------------- */
+ if kclist <> null then do
+    call Alloc_DD clistDD
+    "LMINIT DATAID(CLIST) DDNAME("clistDD")"
+    "LMOPEN DATAID("clist") OPTION(OUTPUT)"
+    returns = STRIP(returns clistDD ALTLIBC)
+    end
+ if kexec <> null then do
+    call Alloc_DD execDD
+    "LMINIT DATAID(EXEC) DDNAME("execDD")"
+    "LMOPEN DATAID("exec") OPTION(OUTPUT)"
+    returns = STRIP(returns execDD ALTLIBE)
+    end
+ if kmsg <> null then do
+    call Alloc_DD msgDD
+    "LMINIT DATAID(MSG) DDNAME("msgDD")"
+    "LMOPEN DATAID("msg") OPTION(OUTPUT)"
+    returns = STRIP(returns msgDD ISPMLIB)
+    end
+ if kpanel <> null then do
+    call Alloc_DD panelDD
+    "LMINIT DATAID(PANEL) DDNAME("panelDD")"
+    "LMOPEN DATAID("panel") OPTION(OUTPUT)"
+    returns = STRIP(returns panelDD ISPPLIB)
+    end
+ if kskel <> null then do
+    call Alloc_DD skelDD
+    "LMINIT DATAID(SKEL) DDNAME("skelDD")"
+    "LMOPEN DATAID("skel") OPTION(OUTPUT)"
+    returns = STRIP(returns skelDD ISPSLIB)
+    end
+
+/* ----------------------------------------------- *
+ * Process all records in the data. stem variable. *
+ * ----------------------------------------------- */
+ do i = 1 to rec
+    record = data.i
+    recordu = TRANSLATE(record)
+    if LEFT(recordu,5) = ">END " then leave
+    if LEFT(recordu,7) = ">CLIST " then do
+       if first = 1 then call add_it
+       type = "Clist"
+       first = 1
+       parse value record with x name
+       iterate
+       end
+    if LEFT(recordu,6) = ">EXEC " then do
+       if first = 1 then call add_it
+       type = "Exec"
+       first = 1
+       parse value record with x name
+       iterate
+       end
+    if LEFT(recordu,5) = ">MSG " then do
+       if first = 1 then call add_it
+       type = "Msg"
+       first = 1
+       parse value record with x name
+       iterate
+       end
+    if LEFT(recordu,7) = ">PANEL " then do
+       if first = 1 then call add_it
+       type = "Panel"
+       first = 1
+       parse value record with x name
+       iterate
+       end
+    if LEFT(recordu,6) = ">SKEL " then do
+       if first = 1 then call add_it
+       type = "Skel"
+       first = 1
+       parse value record with x name
+       iterate
+       end
+   /* --------------------------------------------*
+    * Put the record into the appropriate library *
+    * based on the record type.                   *
+    * ------------------------------------------- */
+    Select
+      When type = "Clist" then
+           "LMPUT DATAID("clist") MODE(INVAR)" ,
+                 "DATALOC(RECORD) DATALEN(80)"
+      When type = "Exec" then
+           "LMPUT DATAID("exec") MODE(INVAR)" ,
+                 "DATALOC(RECORD) DATALEN(80)"
+      When type = "Msg" then
+           "LMPUT DATAID("msg") MODE(INVAR)" ,
+                 "DATALOC(RECORD) DATALEN(80)"
+      When type = "Panel" then
+           "LMPUT DATAID("panel") MODE(INVAR)" ,
+                 "DATALOC(RECORD) DATALEN(80)"
+      When type = "Skel" then
+           "LMPUT DATAID("skel") MODE(INVAR)" ,
+                 "DATALOC(RECORD) DATALEN(80)"
+      end
+    end
+ if type <> null then call add_it
+/* ---------------------------------------------------- *
+ * Processing completed - now lmfree the allocation and *
+ * Libdef the library.                                  *
+ * ---------------------------------------------------- */
+ if kclist <> null then do
+    Address TSO,
+    "ALTLIB ACT APPLICATION(CLIST) FILE("clistDD")"
+    "LMFREE DATAID("clist")"
+    end
+ if kexec <> null then do
+    Address TSO,
+    "ALTLIB ACT APPLICATION(EXEC) FILE("execDD")"
+    "LMFREE DATAID("exec")"
+    end
+ if kmsg <> null then do
+    "LMFREE DATAID("msg")"
+    "LIBDEF ISPMLIB LIBRARY ID("msgDD") STACK"
+    end
+ if kpanel <> null then do
+    "LIBDEF ISPPLIB LIBRARY ID("panelDD") STACK"
+    "LMFREE DATAID("panel")"
+    end
+ if kskel <> null then do
+    "LIBDEF ISPSLIB LIBRARY ID("skelDD") STACK"
+    "LMFREE DATAID("skel")"
+    end
+ return returns
+
+/* --------------------------- *
+ * Add the Member using LmmAdd *
+ * based upon type of resource *
+ * --------------------------- */
+ Add_It:
+ if type = "Clist" then
+    "LMMADD DATAID("clist") MEMBER("name")"
+ if type = "Exec" then
+    "LMMADD DATAID("exec") MEMBER("name")"
+ if type = "Msg" then
+    "LMMADD DATAID("msg") MEMBER("name")"
+ if type = "Panel" then
+    "LMMADD DATAID("panel") MEMBER("name")"
+ if type = "Skel" then
+    "LMMADD DATAID("skel") MEMBER("name")"
+ type = null
+ return
+
+/* ------------------------------ *
+ * ALlocate the temp ispf library *
+ * ------------------------------ */
+ Alloc_DD:
+ arg dd
+ address TSO
+ if pos(LEFT(dd,2),"lc le") > 0 then
+ "ALLOC F("dd") UNIT(SYSALLDA) SPA(5,5) CYL DIR(10)",
+    "RECFM(F B) LRECL(80) BLKSIZE(6160)"
+ else
+ "ALLOC F("dd") UNIT(SYSALLDA) SPA(5,5) CYL DIR(10)",
+    "RECFM(F B) LRECL(80) BLKSIZE(23440)"
+ return
+
+
+/* -------------------------------------------------------------------- *
+ * Beginning of ISPF members to be built dynamically                    *
+ * -------------------------------------------------------------------- */
+
+/*>START
+>Panel $$PRMLIB
+)ATTR
+ \ AREA(SCRL) EXTEND(OFF)
+ { TYPE(TEXT)       CAPS(OFF)                  COLOR(TURQ)
+ ~ TYPE(TEXT)       CAPS(OFF)  HILITE(REVERSE) COLOR(YELLOW)
+ | TYPE(INPUT)                 HILITE(USCORE)  COLOR(TURQ)
+ # TYPE(TEXT)       CAPS(OFF)  HILITE(REVERSE) COLOR(GREEN)
+ } TYPE(TEXT)       CAPS(OFF)                  COLOR(GREEN)
+ % TYPE(TEXT)       CAPS(OFF)
+ + TYPE(TEXT)       CAPS(OFF)  SKIP(ON)        COLOR(WHITE)
+ ¦ TYPE(TEXT)       CAPS(OFF)  HILITE(USCORE)  COLOR(GREEN)
+ ! TYPE(TEXT)       CAPS(OFF)                  COLOR(YELLOW)
+ _ TYPE(TEXT)       CAPS(OFF)                  COLOR(YELLOW)
+ @ TYPE(OUTPUT) JUST(ASIS)                     COLOR(GREEN)
+ ¬ TYPE(INPUT)  JUST(ASIS)     HILITE(USCORE)  COLOR(RED)
+21 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR1)
+22 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR2)
+23 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR3)
+24 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR4)
+25 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR5)
+26 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR6)
+27 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR7)
+28 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR8)
+29 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR9)
+30 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR10)
+31 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR11)
+32 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR12)
+33 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR13)
+34 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR14)
+35 TYPE(INPUT)                 HILITE(USCORE)  COLOR(&$PCLR15)
+)BODY WINDOW(65,22) EXPAND(``)
+@ZDATESTD        {`-`~PARMLIB Concatenation{`-`@ZTIMEL      +
++Command%===> |ZCMD                                             +
++
++` `#Change VOLSER where appropriate and press Enter+` `
++
++    !Want system symbolics resolved?+==>¬Z+ Y/N+
++
++    ¦PDS Concatenation (Fully qualified-no quotes)+ ¦Volume¦+
+\DSAREA                                                         \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+\                                                               \
+!
++` `+Press#Enter+to proceed or#END+to abort execution+` `
+)AREA DSAREA DEPTH(12)
+ +1!>$P$P1                                        !*|$PV$1 !
+ +2!>$P$P2                                        !*|$PV$2 !
+ +3!>$P$P3                                        !*|$PV$3 !
+ +4!>$P$P4                                        !*|$PV$4 !
+ +5!>
+$P$P5                                        !*|$PV$5 !
+ +6!>$P$P6                                        !*|$PV$6 !
+ +7!>$P$P7                                        !*|$PV$7 !
+ +8!>$P$P8                                        !*|$PV$8 !
+ +9!>$P$P9                                        !*|$PV$9 !
++10!>$P$P10                                       !*|$PV$10!
++11!>$P$P11                                       !*|$PV$11!
++12!>$P$P12                                       !*|$PV$12!
++13!>$P$P13                                       !*|$PV$13!
++14!>$P$P14                                       !*|$PV$14!
++15!>$P$P15                                       !*|$PV$15!
+)INIT
+   &ZCMD = ' '
+   .ZVARS = '($RESOLVE)'
+   .CURSOR= $RESOLVE
+)PROC
+   VER (&$RESOLVE,NB,LIST,Y,N)
+   IF (&$P$P1 NE '')
+      VER (&$PV$1,NB)
+   IF (&$P$P2 NE '')
+      VER (&$PV$2,NB)
+   IF (&$P$P3 NE '')
+      VER (&$PV$3,NB)
+   IF (&$P$P4 NE '')
+      VER (&$PV$4,NB)
+   IF (&$P$P5 NE '')
+      VER (&$PV$5,NB)
+   IF (&$P$P6 NE '')
+      VER (&$PV$6,NB)
+   IF (&$P$P7 NE '')
+      VER (&$PV$7,NB)
+   IF (&$P$P8 NE '')
+      VER (&$PV$8,NB)
+   IF (&$P$P8 NE '')
+      VER (&$PV$8,NB)
+   IF (&$P$P10 NE '')
+      VER (&$PV$10,NB)
+   IF (&$P$P11 NE '')
+      VER (&$PV$11,NB)
+   IF (&$P$P12 NE '')
+      VER (&$PV$12,NB)
+   IF (&$P$P13 NE '')
+      VER (&$PV$13,NB)
+   IF (&$P$P14 NE '')
+      VER (&$PV$14,NB)
+   IF (&$P$P15 NE '')
+      VER (&$PV$15,NB)
+)END
+>END*/
